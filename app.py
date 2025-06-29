@@ -1,33 +1,55 @@
-# app.py
 import streamlit as st
 import pandas as pd
-import glob
-import os
+import requests
 import json
 import matplotlib.pyplot as plt
 
 st.set_page_config(layout="wide", page_title="Crypto Market Pulse Dashboard")
 
-DATA_DIR = "data"  # або data-history/data якщо так підключиш
+# --- GitHub config ---
+GH_USER = "topvlad"
+GH_REPO = "market-pulse"
+GH_BRANCH = "data-history"
+DATA_DIR = "data"
+GITHUB_TOKEN = st.secrets["GITHUB_TOKEN"]
+
+headers = {
+    "Authorization": f"token {GITHUB_TOKEN}",
+    "Accept": "application/vnd.github.v3+json"
+}
 
 st.title("🚦 Crypto Market Pulse Dashboard")
 st.write("Live & historical analytics from Coinalyze, GPT digests, and technicals for your main marketmakers.")
 
-# --- Load all available pulse files ---
-pulse_files = sorted(glob.glob(os.path.join(DATA_DIR, "pulse_*.json")))
+# --- 1. List files in /data ---
+@st.cache_data(ttl=60*5)
+def get_data_file_list():
+    api_url = f"https://api.github.com/repos/{GH_USER}/{GH_REPO}/contents/{DATA_DIR}?ref={GH_BRANCH}"
+    r = requests.get(api_url, headers=headers)
+    r.raise_for_status()
+    return r.json()
+
+files_info = get_data_file_list()
+pulse_files = sorted([f['name'] for f in files_info if f['name'].startswith("pulse_") and f['name'].endswith(".json")])
 if not pulse_files:
-    st.error("No pulse_*.json files found in data folder!")
+    st.error("No pulse_*.json files found in remote data folder!")
     st.stop()
 
-# Select period to show
-pulse_dates = [os.path.basename(f).replace("pulse_", "").replace(".json", "") for f in pulse_files]
+# --- 2. Snapshot selection ---
+pulse_dates = [f.replace("pulse_", "").replace(".json", "") for f in pulse_files]
 date_idx = st.selectbox("Оберіть дату/час snapshot:", list(reversed(pulse_dates)))
 sel_file = pulse_files[pulse_dates.index(date_idx)]
+sel_info = next(f for f in files_info if f['name'] == sel_file)
 
-with open(sel_file) as f:
-    data = json.load(f)
+@st.cache_data(ttl=60*5)
+def fetch_json_from_url(url):
+    r = requests.get(url, headers=headers)
+    r.raise_for_status()
+    return json.loads(r.text)
 
-# --- Prepare Data ---
+data = fetch_json_from_url(sel_info['download_url'])
+
+# --- 3. Prepare asset DataFrames ---
 assets = {}
 for asset in data:
     sym = asset["symbol"]
@@ -50,34 +72,39 @@ ohlcv, oi, fr, liq = tabs["ohlcv"], tabs["oi"], tabs["fr"], tabs["liq"]
 
 col1, col2 = st.columns([2,2])
 
+# --- 4. OI & Funding graph ---
 with col1:
     st.subheader("Open Interest (OI) & Funding Rate")
     if not oi.empty and 't' in oi.columns and 'c' in oi.columns and not fr.empty and 'c' in fr.columns:
-        oi['t'] = pd.to_datetime(oi['t'], unit='s')
-        oi.set_index('t', inplace=True)
-        fr['t'] = pd.to_datetime(fr['t'], unit='s')
-        fr.set_index('t', inplace=True)
+        oi_plot = oi.copy()
+        oi_plot['t'] = pd.to_datetime(oi_plot['t'], unit='s')
+        oi_plot.set_index('t', inplace=True)
+        fr_plot = fr.copy()
+        fr_plot['t'] = pd.to_datetime(fr_plot['t'], unit='s')
+        fr_plot.set_index('t', inplace=True)
         fig, ax1 = plt.subplots(figsize=(8, 3))
-        ax1.plot(oi.index, oi['c'], color="blue", label="OI")
+        ax1.plot(oi_plot.index, oi_plot['c'], color="blue", label="OI")
         ax1.set_ylabel("OI", color="blue")
         ax2 = ax1.twinx()
-        ax2.plot(fr.index, fr['c'], color="orange", label="Funding")
+        ax2.plot(fr_plot.index, fr_plot['c'], color="orange", label="Funding")
         ax2.set_ylabel("Funding", color="orange")
         plt.title(f"{asset_selected} OI & Funding Rate")
         st.pyplot(fig)
     else:
         st.warning("Недостатньо даних для графіка OI/Funding.")
 
+# --- 5. Liquidations graph ---
 with col2:
     st.subheader("Ліквідації")
     if not liq.empty and 't' in liq.columns and 'l' in liq.columns and 's' in liq.columns:
-        liq['t'] = pd.to_datetime(liq['t'], unit='s')
-        liq.set_index('t', inplace=True)
-        liq['long'] = liq['l'].astype(float)
-        liq['short'] = liq['s'].astype(float)
-        liq['total'] = liq['long'] + liq['short']
+        liq_plot = liq.copy()
+        liq_plot['t'] = pd.to_datetime(liq_plot['t'], unit='s')
+        liq_plot.set_index('t', inplace=True)
+        liq_plot['long'] = liq_plot['l'].astype(float)
+        liq_plot['short'] = liq_plot['s'].astype(float)
+        liq_plot['total'] = liq_plot['long'] + liq_plot['short']
         fig2, ax = plt.subplots(figsize=(8, 3))
-        ax.bar(liq.index, liq['total'], color="red", width=0.03)
+        ax.bar(liq_plot.index, liq_plot['total'], color="red", width=0.03)
         ax.set_ylabel("Σ Ліквідацій (total)")
         plt.title(f"{asset_selected} Liquidations")
         st.pyplot(fig2)
@@ -90,25 +117,28 @@ if not ohlcv.empty:
 else:
     st.warning("OHLCV data missing.")
 
-# --- GPT Digsest block ---
+# --- 6. GPT Digest Block (remote fetch) ---
 st.header("GPT-дайджест трейдера (по snapshot)")
-digest_files = sorted(glob.glob(os.path.join(DATA_DIR, "gpt_digest_*.txt")))
+
+digest_files = sorted([f['name'] for f in files_info if f['name'].startswith("gpt_digest_") and f['name'].endswith(".txt")])
 if digest_files:
-    # знайти дайджест, найближчий до snapshot
-    dates_d = [os.path.basename(f).replace("gpt_digest_", "").replace(".txt", "") for f in digest_files]
+    dates_d = [f.replace("gpt_digest_", "").replace(".txt", "") for f in digest_files]
     idx = min(range(len(dates_d)), key=lambda i: abs(pd.to_datetime(dates_d[i], format="%Y%m%d_%H%M") - pd.to_datetime(date_idx, format="%Y%m%d_%H%M")))
-    with open(digest_files[idx], encoding="utf-8") as f:
-        gpt_digest = f.read()
-    st.code(gpt_digest, language="text")
+    digest_file = digest_files[idx]
+    digest_info = next(f for f in files_info if f['name'] == digest_file)
+    digest_text = requests.get(digest_info['download_url'], headers=headers).text
+    st.code(digest_text, language="text")
 else:
     st.info("Немає GPT дайджесту у data/")
 
-# --- Alerts block (liq/funding extremes) ---
+# --- 7. Alerts block (liq/funding extremes) ---
 st.header("🚨 Алерти та екстремуми")
 alerts = []
 if not oi.empty and not liq.empty and 'total' in liq.columns:
-    threshold = liq['total'].mean() + 3 * liq['total'].std()
-    spikes = liq[liq['total'] > threshold]
+    liq_plot = liq.copy()
+    liq_plot['total'] = liq_plot['l'].astype(float) + liq_plot['s'].astype(float)
+    threshold = liq_plot['total'].mean() + 3 * liq_plot['total'].std()
+    spikes = liq_plot[liq_plot['total'] > threshold]
     if not spikes.empty:
         alerts.append(f"⚡ Можливий розворот після сплеску ліквідацій: {list(spikes.index.strftime('%Y-%m-%d %H:%M'))}")
 if not fr.empty and 'c' in fr.columns:
@@ -120,7 +150,7 @@ if alerts:
 else:
     st.success("Аномалій не знайдено.")
 
-# --- Master table for all assets in snapshot ---
+# --- 8. Master table for all assets in snapshot ---
 st.header("Master table for snapshot")
 summary = []
 for sym in symbols:
@@ -135,6 +165,19 @@ for sym in symbols:
     liq_sum = liq['l'].sum() + liq['s'].sum() if not liq.empty and 'l' in liq.columns and 's' in liq.columns else 0
     summary.append({"symbol": sym, "close": close, "oi_last": oi_last, "fr_last": fr_last, "liq_sum": liq_sum})
 st.dataframe(pd.DataFrame(summary))
+
+# --- 9. Show plots (trend images) ---
+st.header("OI & Funding Trend Plots (PNG, live from repo)")
+plots_url = f"https://api.github.com/repos/{GH_USER}/{GH_REPO}/contents/{DATA_DIR}/plots?ref={GH_BRANCH}"
+plots_info = requests.get(plots_url, headers=headers).json()
+if isinstance(plots_info, list):
+    plot_names = [f['name'] for f in plots_info if f['name'].endswith(".png")]
+    for p in plot_names:
+        if asset_selected.replace("/", "_") in p:
+            plot_info = next(f for f in plots_info if f['name'] == p)
+            st.image(plot_info['download_url'], caption=p)
+else:
+    st.info("No plots found in plots/ subfolder.")
 
 st.write("---")
 st.info("Dashboard MVP by [your team]. Звʼяжись з @topvlad або @lostframe_404 для вдосконалення/розширення!")
