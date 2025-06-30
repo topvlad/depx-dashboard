@@ -17,7 +17,8 @@ def combine_pngs(symbols, data_dir, out_file):
         if os.path.isfile(fname):
             imgs.append(Image.open(fname))
         else:
-            imgs.append(Image.new('RGB', (400,200), color=(240,240,240)))
+            # fallback: blank image if missing
+            imgs.append(Image.new('RGB', (400, 200), color=(240,240,240)))
     w, h = imgs[0].size
     grid = Image.new('RGB', (2*w, 2*h), color=(255,255,255))
     grid.paste(imgs[0], (0,0))
@@ -25,6 +26,8 @@ def combine_pngs(symbols, data_dir, out_file):
     grid.paste(imgs[2], (0,h))
     grid.paste(imgs[3], (w,h))
     grid.save(out_file)
+    
+# ========== UTILITIES ==========
 
 def sparkline(data):
     chart = alt.Chart(pd.DataFrame({'y': data})).mark_line().encode(
@@ -37,6 +40,7 @@ def pretty_label(dtstr):
     return d.strftime("%d %b %H:%M")
 
 def aggregate_gpt_digest(sym, digest_files, date_idx, n=4):
+    # Aggregate last n GPT digests for this symbol up to date_idx
     idxs = list(range(max(0, date_idx-n+1), date_idx+1))
     digests = []
     for i in idxs:
@@ -48,6 +52,11 @@ def aggregate_gpt_digest(sym, digest_files, date_idx, n=4):
                 txt = block[start:end].strip() if end != -1 else block[start:].strip()
                 digests.append(txt)
     return "\n---\n".join(digests)
+
+# ========== APP BODY ==========
+
+st.title("🚦 Crypto Market Pulse Dashboard")
+st.write("Live & historical analytics from Coinalyze, GPT digests, and technicals for your main marketmakers.")
 
 # --- Load all available pulse files ---
 pulse_files = sorted(glob.glob(os.path.join(DATA_DIR, "pulse_*.json")))
@@ -79,16 +88,14 @@ for asset in data:
     }
 
 symbols = list(assets.keys())[:4]  # Restrict to top 4 (crypto square)
-digest_files = sorted(glob.glob(os.path.join(DATA_DIR, "gpt_digest_*.txt")))
 
-st.title("🚦 Crypto Market Pulse Dashboard")
-st.write("Live & historical analytics from Coinalyze, GPT digests, and technicals for your main marketmakers.")
-
-# ========== CRYPTO SQUARE GRID ==========
+# ========== DASHBOARD GRID ==========
 st.header("🔲 Crypto Market 'Square' — All Key Markets At A Glance")
 
 rows, cols = 2, 2
 symbols_grid = [symbols[i*cols:(i+1)*cols] for i in range(rows)]
+
+digest_files = sorted(glob.glob(os.path.join(DATA_DIR, "gpt_digest_*.txt")))
 
 for symbol_row in symbols_grid:
     cols_st = st.columns(cols)
@@ -98,6 +105,7 @@ for symbol_row in symbols_grid:
             tabs = assets[sym]
             ohlcv, oi, fr, liq = tabs["ohlcv"], tabs["oi"], tabs["fr"], tabs["liq"]
 
+            # OI & Funding
             st.markdown("**Open Interest (OI) & Funding Rate**")
             if not oi.empty and 't' in oi.columns and 'c' in oi.columns and not fr.empty and 'c' in fr.columns:
                 oi_plot = oi.copy()
@@ -117,6 +125,7 @@ for symbol_row in symbols_grid:
             else:
                 st.info("Недостатньо даних для графіка OI/Funding.")
 
+            # Liquidations
             st.markdown("**Ліквідації**")
             if not liq.empty and 't' in liq.columns and 'l' in liq.columns and 's' in liq.columns:
                 liq_plot = liq.copy()
@@ -133,12 +142,14 @@ for symbol_row in symbols_grid:
             else:
                 st.info("Недостатньо даних для графіка ліквідацій.")
 
+            # Table OHLCV (show last 8 for brevity)
             st.markdown("**OHLCV (last 8)**")
             if not ohlcv.empty:
                 st.altair_chart(sparkline(ohlcv['c'].tail(8)), use_container_width=True)
             else:
                 st.info("OHLCV data missing.")
 
+            # Alerts (liq/funding extremes)
             alerts = []
             if not oi.empty and not liq.empty and 'l' in liq.columns and 's' in liq.columns:
                 liq_plot = liq.copy()
@@ -157,6 +168,7 @@ for symbol_row in symbols_grid:
             else:
                 st.success("Аномалій не знайдено.")
 
+            # GPT Digest per asset (last 4 digests)
             st.markdown("**GPT-дайджест (last 4)**")
             if digest_files:
                 agg_digest = aggregate_gpt_digest(sym, digest_files, date_idx)
@@ -169,19 +181,12 @@ for symbol_row in symbols_grid:
 
             st.write("---")
 
-# ========== MERGED PNG OVERVIEW ==========
-merged_png = f"{DATA_DIR}/plots/snapshot_{pulse_dates[date_idx]}.png"
-if os.path.isfile(merged_png):
-    st.image(merged_png, caption="OI/Funding Overview")
-else:
-    # Try to generate on the fly if not present
-    try:
-        combine_pngs(symbols, DATA_DIR, merged_png)
-        st.image(merged_png, caption="OI/Funding Overview")
-    except Exception:
-        st.info("No combined PNG available.")
+# ========== SNAPSHOT OVERVIEW PNG ==========
 
-# ========== MASTER TABLE WITH DELTA ==========
+st.image(f"{DATA_DIR}/plots/snapshot_{pulse_dates[date_idx]}.png", caption="OI/Funding Overview")
+
+# ========== MASTER TABLE (with delta) ==========
+
 st.header("📊 Master table for snapshot")
 summary = []
 for sym in symbols:
@@ -198,6 +203,7 @@ for sym in symbols:
 
 df = pd.DataFrame(summary)
 if len(pulse_files) > 1:
+    # Load previous snapshot for delta
     with open(pulse_files[date_idx-1]) as f:
         prev_data = json.load(f)
     prev_assets = {a["symbol"]: a for a in prev_data}
@@ -209,6 +215,7 @@ if len(pulse_files) > 1:
             df.loc[row.Index, "Δclose"] = f"{delta:+.2f}"
         except Exception:
             df.loc[row.Index, "Δclose"] = ""
+    # Conditional coloring
     def color_delta(val):
         if isinstance(val, str) and val.startswith("+"):
             return "color: green"
@@ -220,6 +227,7 @@ else:
     st.dataframe(df, use_container_width=True)
 
 # ========== OI/FUNDING ALERT LOG ==========
+
 st.header("OI/Funding Alert History")
 try:
     alert_log = pd.read_csv(os.path.join(DATA_DIR, "oi_fr_alerts.csv"))
