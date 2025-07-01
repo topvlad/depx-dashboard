@@ -129,14 +129,25 @@ else:
 # --- GPT Digest Block (remote fetch) ---
 st.header("GPT-дайджест трейдера (по snapshot)")
 
-digest_files = sorted([f['name'] for f in files_info if f['name'].startswith("gpt_digest_") and f['name'].endswith(".txt")])
+digest_files = sorted(
+    [f['name'] for f in files_info if f['name'].startswith("gpt_digest_") and f['name'].endswith(".txt")],
+    reverse=True,
+)
 if digest_files:
-    dates_d = [f.replace("gpt_digest_", "").replace(".txt", "") for f in digest_files]
-    idx = min(range(len(dates_d)), key=lambda i: abs(pd.to_datetime(dates_d[i], format="%Y%m%d_%H%M") - pd.to_datetime(date_idx, format="%Y%m%d_%H%M")))
-    digest_file = digest_files[idx]
-    digest_info = next(f for f in files_info if f['name'] == digest_file)
-    digest_text = requests.get(digest_info['download_url'], headers=headers).text
-    st.code(digest_text, language="text")
+    # Combine the most recent digests into a brief summary
+    latest = digest_files[:3]
+    combined = []
+    for name in latest:
+        info = next(f for f in files_info if f['name'] == name)
+        combined.append(requests.get(info['download_url'], headers=headers).text.strip())
+    summary = "\n\n".join(combined)
+    st.code("\n".join(summary.splitlines()[:10]), language="text")
+
+    with st.expander("Вибрати дайджест"):
+        sel_digest = st.selectbox("Оберіть файл:", digest_files)
+        info = next(f for f in files_info if f['name'] == sel_digest)
+        text = requests.get(info['download_url'], headers=headers).text
+        st.code(text, language="text")
 else:
     st.info("Немає GPT дайджесту у data/")
 
