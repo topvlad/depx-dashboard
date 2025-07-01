@@ -23,3 +23,19 @@ def test_fetch_json_http_error():
     with patch('requests.get', return_value=mock_resp):
         data = fetch_json_from_url('http://bad')
         assert data == {}
+
+import pandas as pd
+import numpy as np
+from utils import parse_snapshot_timestamp, liquidation_threshold
+
+
+def test_parse_snapshot_timestamp():
+    ts = parse_snapshot_timestamp('20240102_1530')
+    assert ts == pd.Timestamp('2024-01-02 15:30')
+
+
+def test_liquidation_threshold():
+    data = [1, 2, 3, 4, 5]
+    expected = pd.Series(data, dtype=float).mean() + 3 * pd.Series(data, dtype=float).std()
+    thresh = liquidation_threshold(data)
+    assert thresh == expected
