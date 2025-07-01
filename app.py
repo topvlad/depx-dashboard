@@ -29,10 +29,13 @@ def aggregate_digest(sym, files, idx, n=4):
             start = block.find(f"=== {sym} ===")
             if start >= 0:
                 end = block.find("===", start+1)
-                parts.append(block[start:end].strip() if end>0 else block[start:].strip())
+                txt = block[start:end].strip() if end>0 else block[start:].strip()
+                if txt and not txt.strip().endswith(sym):  # skip empty
+                    parts.append(txt)
         except Exception:
             continue
     return "\n---\n".join(parts)
+
 
 # --- GitHub Data Fetching ---
 @st.cache_data(ttl=300)
@@ -112,23 +115,31 @@ for r in range(2):
         if not df:
             cols[c].warning(f"No data for {sym}")
             continue
-        ohlcv, oi, fr, liq = map(pd.DataFrame, (df["ohlcv"], df["oi"], df["fr"], df["liq"]))
+        ohlcv, oi, fr, liq = map(pd.DataFrame, (df.get("ohlcv", []), df.get("oi", []), df.get("fr", []), df.get("liq", [])))
         cols[c].subheader(sym)
 
         # OI & FR plot
-        if not oi.empty and not fr.empty:
+        if not oi.empty and 'c' in oi.columns and not fr.empty and 'c' in fr.columns:
             oi['t']=pd.to_datetime(oi['t'],unit='s'); fr['t']=pd.to_datetime(fr['t'],unit='s')
             fig, ax1 = plt.subplots(figsize=(4,2))
             ax1.plot(oi['t'],oi['c'],color="blue"); ax2=ax1.twinx(); ax2.plot(fr['t'],fr['c'],color="orange")
             cols[c].pyplot(fig)
+        else:
+            cols[c].info("No OI or Funding data.")
 
         # Sparkline for recent prices
         if not ohlcv.empty and 'c' in ohlcv.columns:
             cols[c].altair_chart(spark(ohlcv['c'].tail(8)), use_container_width=True)
+        else:
+            cols[c].info("No price data.")
 
         # GPT digest (aggregated last 4)
-        dig = aggregate_digest(sym, digest_files, sel_idx)
-        cols[c].code(dig if dig else "No GPT digest.")
+        if digest_files:
+            dig = aggregate_digest(sym, digest_files, sel_idx)
+            cols[c].code(dig if dig else f"No GPT digest for {sym}.")
+        else:
+            cols[c].info("No GPT digests available.")
+
 
 # --- Animated GIF (if present) ---
 gif_path = f"{DATA_DIR}/plots/square_latest.gif"
