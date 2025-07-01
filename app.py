@@ -2,6 +2,7 @@ import streamlit as st
 import pandas as pd
 import requests
 import matplotlib.pyplot as plt
+import altair as alt
 
 st.set_page_config(layout="wide", page_title="Crypto Market Pulse Dashboard")
 
@@ -78,6 +79,41 @@ st.header(f"Market Pulse for {asset_selected}")
 
 tabs = assets[asset_selected]
 ohlcv, oi, fr, liq = tabs["ohlcv"], tabs["oi"], tabs["fr"], tabs["liq"]
+
+# --- Quick metrics ---
+latest_price = None
+price_change = None
+oi_delta = None
+if not ohlcv.empty and 'c' in ohlcv.columns:
+    latest_price = ohlcv['c'].iloc[-1]
+    if len(ohlcv) > 1 and ohlcv['c'].iloc[0] != 0:
+        price_change = ((latest_price - ohlcv['c'].iloc[0]) / ohlcv['c'].iloc[0]) * 100
+if not oi.empty and 'c' in oi.columns:
+    oi_delta = oi['c'].iloc[-1] - oi['c'].iloc[0]
+
+mc1, mc2, mc3 = st.columns(3)
+mc1.metric(
+    "Latest Price",
+    f"{latest_price:.2f}" if latest_price is not None else "n/a",
+    delta=f"{price_change:.2f}%" if price_change is not None else None,
+)
+mc2.metric(
+    "% Change",
+    f"{price_change:.2f}%" if price_change is not None else "n/a",
+)
+mc3.metric(
+    "OI Δ",
+    f"{oi_delta:.2f}" if oi_delta is not None else "n/a",
+)
+
+if not ohlcv.empty and 't' in ohlcv.columns and 'c' in ohlcv.columns:
+    trend_df = ohlcv[['t', 'c']].tail(100).copy()
+    trend_df['t'] = pd.to_datetime(trend_df['t'], unit='s')
+    trend_chart = alt.Chart(trend_df).mark_line().encode(
+        x='t:T',
+        y='c:Q'
+    ).properties(height=150)
+    st.altair_chart(trend_chart, use_container_width=True)
 
 col1, col2 = st.columns([2,2])
 
