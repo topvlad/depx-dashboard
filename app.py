@@ -8,6 +8,8 @@ try:
 except ImportError:  # Python<3.9 fallback
     from pytz import timezone as ZoneInfo
 
+from utils import fetch_json_from_url
+
 st.set_page_config(layout="wide", page_title="Crypto Market Pulse Dashboard")
 
 # --- GitHub config ---
@@ -66,23 +68,16 @@ sel_file = file_for_label[date_label]
 sel_info = next(f for f in files_info if f["name"] == sel_file)
 
 @st.cache_data(ttl=60*5)
-def fetch_json_from_url(url, timeout=None):
-    """Fetch JSON data from a URL with optional timeout.
+def fetch_cached_json(url, timeout=None):
+    """Cached wrapper around :func:`utils.fetch_json_from_url`."""
+    return fetch_json_from_url(
+        url,
+        timeout=timeout,
+        headers=headers,
+        on_error=st.error,
+    )
 
-    On network or decoding errors an empty dict is returned and the error is
-    shown via ``st.error``.
-    """
-    try:
-        r = requests.get(url, headers=headers, timeout=timeout)
-        r.raise_for_status()
-        return r.json()
-    except requests.RequestException as exc:
-        st.error(f"Request failed: {exc}")
-    except ValueError as exc:
-        st.error(f"JSON decode failed: {exc}")
-    return {}
-
-data = fetch_json_from_url(sel_info['download_url'])
+data = fetch_cached_json(sel_info['download_url'])
 
 # --- Prepare asset DataFrames ---
 assets = {}
