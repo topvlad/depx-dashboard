@@ -3,6 +3,10 @@ import pandas as pd
 import requests
 import json
 import matplotlib.pyplot as plt
+from utils import (
+    get_data_file_list as _get_data_file_list,
+    fetch_json_from_url as _fetch_json_from_url,
+)
 
 st.set_page_config(layout="wide", page_title="Crypto Market Pulse Dashboard")
 
@@ -23,10 +27,7 @@ st.write("Live & historical analytics from Coinalyze, GPT digests, and technical
 
 @st.cache_data(ttl=60*5)
 def get_data_file_list():
-    api_url = f"https://api.github.com/repos/{GH_USER}/{GH_REPO}/contents/{DATA_DIR}?ref={GH_BRANCH}"
-    r = requests.get(api_url, headers=headers)
-    r.raise_for_status()
-    return r.json()
+    return _get_data_file_list(GH_USER, GH_REPO, GH_BRANCH, DATA_DIR, headers)
 
 files_info = get_data_file_list()
 pulse_files = sorted([f['name'] for f in files_info if f['name'].startswith("pulse_") and f['name'].endswith(".json")])
@@ -42,9 +43,7 @@ sel_info = next(f for f in files_info if f['name'] == sel_file)
 
 @st.cache_data(ttl=60*5)
 def fetch_json_from_url(url):
-    r = requests.get(url, headers=headers)
-    r.raise_for_status()
-    return json.loads(r.text)
+    return _fetch_json_from_url(url, headers)
 
 data = fetch_json_from_url(sel_info['download_url'])
 
