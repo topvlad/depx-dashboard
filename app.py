@@ -1,7 +1,6 @@
 import streamlit as st
 import pandas as pd
 import requests
-import json
 import matplotlib.pyplot as plt
 
 st.set_page_config(layout="wide", page_title="Crypto Market Pulse Dashboard")
@@ -50,10 +49,10 @@ def fetch_json_from_url(url, timeout=None):
     try:
         r = requests.get(url, headers=headers, timeout=timeout)
         r.raise_for_status()
-        return json.loads(r.text)
+        return r.json()
     except requests.RequestException as exc:
         st.error(f"Request failed: {exc}")
-    except json.JSONDecodeError as exc:
+    except ValueError as exc:
         st.error(f"JSON decode failed: {exc}")
     return {}
 
