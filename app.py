@@ -224,12 +224,48 @@ for sym in symbols:
     oi = tabs["oi"]
     fr = tabs["fr"]
     liq = tabs["liq"]
+
     close = ohlcv['c'].iloc[-1] if not ohlcv.empty and 'c' in ohlcv.columns else None
     oi_last = oi['c'].iloc[-1] if not oi.empty and 'c' in oi.columns else None
     fr_last = fr['c'].iloc[-1] if not fr.empty and 'c' in fr.columns else None
     liq_sum = liq['l'].sum() + liq['s'].sum() if not liq.empty and 'l' in liq.columns and 's' in liq.columns else 0
-    summary.append({"symbol": sym, "close": close, "oi_last": oi_last, "fr_last": fr_last, "liq_sum": liq_sum})
-st.dataframe(pd.DataFrame(summary))
+
+    change_24h, vol_24h, oi_delta = None, None, None
+    if not ohlcv.empty and 't' in ohlcv.columns and 'c' in ohlcv.columns:
+        ohlcv_temp = ohlcv.copy()
+        ohlcv_temp['t'] = pd.to_datetime(ohlcv_temp['t'], unit='s', errors='coerce')
+        ohlcv_temp.set_index('t', inplace=True)
+        ts_last = ohlcv_temp.index[-1]
+        win = ohlcv_temp.loc[ohlcv_temp.index >= ts_last - pd.Timedelta(hours=24)]
+        if not win.empty:
+            first_close = win['c'].iloc[0]
+            last_close = win['c'].iloc[-1]
+            if first_close:
+                change_24h = (last_close - first_close) / first_close * 100
+            vol_24h = win['v'].sum() if 'v' in win.columns else None
+    if not oi.empty and 't' in oi.columns and 'c' in oi.columns:
+        oi_temp = oi.copy()
+        oi_temp['t'] = pd.to_datetime(oi_temp['t'], unit='s', errors='coerce')
+        oi_temp.set_index('t', inplace=True)
+        ts_last = oi_temp.index[-1]
+        win = oi_temp.loc[oi_temp.index >= ts_last - pd.Timedelta(hours=24)]
+        if not win.empty:
+            oi_delta = win['c'].iloc[-1] - win['c'].iloc[0]
+
+    summary.append({
+        "symbol": sym,
+        "close": close,
+        "change_24h": change_24h,
+        "volume_24h": vol_24h,
+        "oi_last": oi_last,
+        "oi_delta": oi_delta,
+        "fr_last": fr_last,
+        "liq_sum": liq_sum,
+    })
+
+summary_df = pd.DataFrame(summary)
+sort_col = st.selectbox("Sort by:", summary_df.columns, index=0)
+st.data_editor(summary_df.sort_values(sort_col, ascending=False), use_container_width=True)
 
 # --- Show plots (trend images) ---
 st.header("OI & Funding Trend Plots (PNG, live from repo)")
