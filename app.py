@@ -2,6 +2,7 @@ import streamlit as st
 import pandas as pd
 import requests
 import matplotlib.pyplot as plt
+import time
 
 st.set_page_config(layout="wide", page_title="Crypto Market Pulse Dashboard")
 
@@ -180,11 +181,22 @@ st.header("OI & Funding Trend Plots (PNG, live from repo)")
 plots_url = f"https://api.github.com/repos/{GH_USER}/{GH_REPO}/contents/{DATA_DIR}/plots?ref={GH_BRANCH}"
 plots_info = requests.get(plots_url, headers=headers).json()
 if isinstance(plots_info, list):
-    plot_names = [f['name'] for f in plots_info if f['name'].endswith(".png")]
-    for p in plot_names:
-        if asset_selected.replace("/", "_") in p:
-            plot_info = next(f for f in plots_info if f['name'] == p)
-            st.image(plot_info['download_url'], caption=p)
+    matched = [f for f in plots_info
+               if f['name'].endswith('.png') and asset_selected.replace('/', '_') in f['name']]
+    if matched:
+        matched = sorted(matched, key=lambda x: x['name'])
+        urls = [f['download_url'] for f in matched]
+        names = [f['name'] for f in matched]
+        idx = st.slider('Frame', 0, len(urls) - 1, 0)
+        if st.checkbox('Auto play'):
+            placeholder = st.empty()
+            for i in range(len(urls)):
+                placeholder.image(urls[i], caption=names[i])
+                time.sleep(0.3)
+        else:
+            st.image(urls[idx], caption=names[idx])
+    else:
+        st.info("No plots found for asset.")
 else:
     st.info("No plots found in plots/ subfolder.")
 
