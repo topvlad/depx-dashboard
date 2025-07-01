@@ -12,6 +12,10 @@ GH_BRANCH = "data-history"
 DATA_DIR = "data"
 GITHUB_TOKEN = st.secrets["GITHUB_TOKEN"]
 
+# Optional threshold configuration
+DEFAULT_THRESHOLDS = st.secrets.get("thresholds", {})
+ASSET_MULTIPLIERS = st.secrets.get("asset_multipliers", {})
+
 headers = {
     "Authorization": f"token {GITHUB_TOKEN}",
     "Accept": "application/vnd.github.v3+json"
@@ -73,6 +77,22 @@ for asset in data:
 symbols = list(assets.keys())
 st.sidebar.title("Вибір активу")
 asset_selected = st.sidebar.selectbox("Актив:", symbols)
+
+# Sidebar controls for alert thresholds
+liq_pct = st.sidebar.slider(
+    "Liquidation spike percentile",
+    min_value=50,
+    max_value=100,
+    value=int(DEFAULT_THRESHOLDS.get("liquidation_percentile", 95)),
+)
+funding_rate_threshold = st.sidebar.number_input(
+    "Funding rate alert threshold",
+    min_value=0.0,
+    value=float(DEFAULT_THRESHOLDS.get("funding_rate", 0.01)),
+    step=0.001,
+)
+
+asset_multiplier = ASSET_MULTIPLIERS.get(asset_selected, 1.0)
 
 st.header(f"Market Pulse for {asset_selected}")
 
@@ -146,12 +166,15 @@ alerts = []
 if not oi.empty and not liq.empty and 'total' in liq.columns:
     liq_plot = liq.copy()
     liq_plot['total'] = liq_plot['l'].astype(float) + liq_plot['s'].astype(float)
-    threshold = liq_plot['total'].mean() + 3 * liq_plot['total'].std()
+    base_threshold = liq_plot['total'].quantile(liq_pct / 100.0)
+    threshold = base_threshold * asset_multiplier
     spikes = liq_plot[liq_plot['total'] > threshold]
     if not spikes.empty:
-        alerts.append(f"⚡ Можливий розворот після сплеску ліквідацій: {list(spikes.index.strftime('%Y-%m-%d %H:%M'))}")
+        alerts.append(
+            f"⚡ Можливий розворот після сплеску ліквідацій: {list(spikes.index.strftime('%Y-%m-%d %H:%M'))}"
+        )
 if not fr.empty and 'c' in fr.columns:
-    if fr['c'].abs().max() > 0.01:
+    if fr['c'].abs().max() > funding_rate_threshold:
         alerts.append(f"⚡ Екстрим у funding rate ({fr['c'].max():.4f})")
 if alerts:
     for alert in alerts:
