@@ -2,6 +2,11 @@ import streamlit as st
 import pandas as pd
 import requests
 import matplotlib.pyplot as plt
+from datetime import datetime, timezone
+try:
+    from zoneinfo import ZoneInfo
+except ImportError:  # Python<3.9 fallback
+    from pytz import timezone as ZoneInfo
 
 st.set_page_config(layout="wide", page_title="Crypto Market Pulse Dashboard")
 
@@ -28,16 +33,33 @@ def get_data_file_list():
     return r.json()
 
 files_info = get_data_file_list()
-pulse_files = sorted([f['name'] for f in files_info if f['name'].startswith("pulse_") and f['name'].endswith(".json")])
+pulse_files = sorted([
+    f["name"]
+    for f in files_info
+    if f["name"].startswith("pulse_") and f["name"].endswith(".json")
+])
 if not pulse_files:
     st.error("No pulse_*.json files found in remote data folder!")
     st.stop()
 
 # --- Snapshot selection ---
-pulse_dates = [f.replace("pulse_", "").replace(".json", "") for f in pulse_files]
-date_idx = st.selectbox("Оберіть дату/час snapshot:", list(reversed(pulse_dates)))
-sel_file = pulse_files[pulse_dates.index(date_idx)]
-sel_info = next(f for f in files_info if f['name'] == sel_file)
+user_tz = datetime.now().astimezone().tzinfo
+pulse_labels = []
+file_for_label = {}
+date_str_for_label = {}
+for fname in pulse_files:
+    date_str = fname.replace("pulse_", "").replace(".json", "")
+    dt = datetime.strptime(date_str, "%Y%m%d_%H%M").replace(tzinfo=timezone.utc)
+    dt_local = dt.astimezone(user_tz)
+    label = dt_local.strftime("%Y-%m-%d %H:%M %Z")
+    pulse_labels.append(label)
+    file_for_label[label] = fname
+    date_str_for_label[label] = date_str
+
+date_label = st.selectbox("Оберіть дату/час snapshot:", list(reversed(pulse_labels)))
+date_idx = date_str_for_label[date_label]
+sel_file = file_for_label[date_label]
+sel_info = next(f for f in files_info if f["name"] == sel_file)
 
 @st.cache_data(ttl=60*5)
 def fetch_json_from_url(url, timeout=None):
