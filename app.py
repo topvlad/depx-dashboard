@@ -41,10 +41,21 @@ sel_file = pulse_files[pulse_dates.index(date_idx)]
 sel_info = next(f for f in files_info if f['name'] == sel_file)
 
 @st.cache_data(ttl=60*5)
-def fetch_json_from_url(url):
-    r = requests.get(url, headers=headers)
-    r.raise_for_status()
-    return json.loads(r.text)
+def fetch_json_from_url(url, timeout=None):
+    """Fetch JSON data from a URL with optional timeout.
+
+    On network or decoding errors an empty dict is returned and the error is
+    shown via ``st.error``.
+    """
+    try:
+        r = requests.get(url, headers=headers, timeout=timeout)
+        r.raise_for_status()
+        return json.loads(r.text)
+    except requests.RequestException as exc:
+        st.error(f"Request failed: {exc}")
+    except json.JSONDecodeError as exc:
+        st.error(f"JSON decode failed: {exc}")
+    return {}
 
 data = fetch_json_from_url(sel_info['download_url'])
 
