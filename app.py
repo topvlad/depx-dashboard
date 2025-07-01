@@ -2,6 +2,7 @@ import streamlit as st
 import pandas as pd
 import requests
 import matplotlib.pyplot as plt
+import altair as alt
 
 st.set_page_config(layout="wide", page_title="Crypto Market Pulse Dashboard")
 
@@ -121,7 +122,18 @@ with col2:
         st.warning("Недостатньо даних для графіка ліквідацій.")
 
 st.subheader("Таблиця OHLCV")
-if not ohlcv.empty:
+if not ohlcv.empty and {'t', 'o', 'h', 'l', 'c'} <= set(ohlcv.columns):
+    chart_df = ohlcv.tail(100).copy()
+    chart_df = chart_df.rename(columns={'t': 'date', 'o': 'open', 'h': 'high', 'l': 'low', 'c': 'close'})
+    chart_df['date'] = pd.to_datetime(chart_df['date'], unit='s')
+    base = alt.Chart(chart_df).encode(x='date:T')
+    rule = base.mark_rule().encode(y='low:Q', y2='high:Q')
+    bar = base.mark_bar().encode(
+        y='open:Q',
+        y2='close:Q',
+        color=alt.condition('datum.close >= datum.open', alt.value('#26a69a'), alt.value('#ef5350')),
+    )
+    st.altair_chart((rule + bar).properties(height=300).interactive(), use_container_width=True)
     st.dataframe(ohlcv.tail(20))
 else:
     st.warning("OHLCV data missing.")
