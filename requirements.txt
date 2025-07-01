@@ -1,4 +1,6 @@
-streamlit
-pandas
-requests
-matplotlib
+streamlit==1.46.1
+pandas==2.3.0
+requests==2.32.4
+matplotlib==3.10.3
+altair==5.5.0
+pillow==11.3.0
