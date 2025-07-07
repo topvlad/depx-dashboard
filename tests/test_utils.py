@@ -11,8 +11,9 @@ def test_fetch_json_success():
     mock_resp.json.return_value = {"foo": "bar"}
     mock_resp.raise_for_status.return_value = None
     with patch('requests.get', return_value=mock_resp) as mock_get:
-        data = fetch_json_from_url('http://example.com')
-        mock_get.assert_called_once_with('http://example.com', timeout=None)
+        headers = {"X-Test": "1"}
+        data = fetch_json_from_url('http://example.com', timeout=5, headers=headers)
+        mock_get.assert_called_once_with('http://example.com', headers=headers, timeout=5)
         mock_resp.json.assert_called_once()
         assert data == {"foo": "bar"}
 
@@ -20,12 +21,28 @@ def test_fetch_json_success():
 def test_fetch_json_http_error():
     mock_resp = Mock()
     mock_resp.raise_for_status.side_effect = requests.HTTPError('boom')
+    messages = []
+
     with patch('requests.get', return_value=mock_resp):
-        data = fetch_json_from_url('http://bad')
+        data = fetch_json_from_url('http://bad', on_error=messages.append)
         assert data == {}
 
+    assert messages and messages[0].startswith('Request failed:')
+
+
+def test_fetch_json_json_error():
+    mock_resp = Mock()
+    mock_resp.raise_for_status.return_value = None
+    mock_resp.json.side_effect = ValueError('invalid')
+    collected = []
+
+    with patch('requests.get', return_value=mock_resp):
+        data = fetch_json_from_url('http://bad-json', on_error=collected.append)
+        assert data == {}
+
+    assert collected and collected[0].startswith('JSON decode failed:')
+
 import pandas as pd
-import numpy as np
 from utils import parse_snapshot_timestamp, liquidation_threshold
 
 
